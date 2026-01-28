@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>ERP BMW - Sistema Completo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #f5f7fa; }
+        .login-container { display: flex; justify-content: center; align-items: center; height: 100vh; background: linear-gradient(135deg, #0F2540 0%, #1C69D4 100%); }
+        .login-box { background: white; padding: 40px; border-radius: 16px; width: 400px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+        .login-logo { text-align: center; margin-bottom: 30px; }
+        .login-logo h1 { font-size: 32px; color: #0F2540; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; }
+        .btn-login { width: 100%; padding: 14px; background: #1C69D4; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+        .login-error { background: #FFEBEE; color: #c62828; padding: 12px; border-radius: 8px; margin-bottom: 20px; display: none; }
+        .app-container { display: none; }
+        .app-layout { display: flex; height: 100vh; }
+        .sidebar { width: 280px; background: linear-gradient(180deg, #1a1a1a 0%, #0F2540 100%); color: white; padding: 20px; overflow-y: auto; }
+        .main { flex: 1; padding: 20px; overflow-y: auto; }
+        .panel { width: 350px; background: white; padding: 20px; overflow-y: auto; }
+        .header { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .card { background: white; padding: 20px; margin-bottom: 15px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .card.verde { border-left: 4px solid #2ecc71; }
+        .card.rojo { border-left: 4px solid #e74c3c; }
+        .btn { padding: 10px 20px; margin: 5px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 12px; }
+        .btn-blue { background: #1C69D4; color: white; }
+        .btn-green { background: #2ecc71; color: white; }
+        .btn-orange { background: #f39c12; color: white; }
+        .btn-logout { background: #e74c3c; color: white; }
+        .toolbar { display: flex; gap: 15px; margin-bottom: 20px; }
+        .toolbar input { flex: 1; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px; }
+        .pieza-temp:hover, .pieza-agregar:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.15); transform: translateY(-2px); }
+    </style>
+</head>
+<body>
+    <div id="loginContainer" class="login-container">
+        <div class="login-box">
+            <div class="login-logo">
+                <h1>🚗 ERP BMW</h1>
+                <p>Sistema de Autopartes</p>
+            </div>
+            <div id="loginError" class="login-error"></div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Usuario</label>
+                    <input type="text" id="username" autocomplete="off" required>
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" id="password" autocomplete="new-password" required>
+                </div>
+                <button type="submit" class="btn-login">INICIAR SESIÓN</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="appContainer" class="app-container">
+        <div class="app-layout">
+            <div class="sidebar">
+                <h2>🚗 ERP BMW</h2>
+                <div id="menuContainer"></div>
+            </div>
+            <div class="main">
+                <div class="header">
+                    <div>
+                        <h1 id="moduleTitle">Sistema</h1>
+                        <p>Usuario: <strong id="userName"></strong></p>
+                    </div>
+                    <button class="btn btn-logout" onclick="logout()">SALIR</button>
+                </div>
+                <div id="mainContent"></div>
+            </div>
+            <div class="panel" id="sidePanel"></div>
+        </div>
+    </div>
+
+    <script>
+        const SHEET_ID = '1T7Rp4yiCnawlSLZimL1xY2iaEaeTw3LlNe5iydtWgNw';
+        const API_KEY = 'AIzaSyAt8YywvmJUV3XGw-XZ_PXz4heUYkwvBLg';
+        const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}`;
+        
+        let currentUser = null;
+        let usuarios = [];
+        let presupuestos = [];
+        let clientes = [];
+        let itemsCotizar = [];
+        let productosVisibles = [];
+        let productos = [];
+        
+        const DISP = {
+            'DISP': '✅ Disponible',
+            '10D': '❗10 días',
+            '15D': '❗15 días',
+            '30D': '❗30 días'
+        };
+        
+        async function login(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('loginError');
+            
+            errorDiv.style.display = 'none';
+            
+            try {
+                const url = `${BASE_URL}/values/USUARIOS?key=${API_KEY}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (!data.values) throw new Error('No hay datos');
+                
+                const headers = data.values[0];
+                usuarios = data.values.slice(1).map(row => {
+                    const obj = {};
+                    headers.forEach((h, i) => obj[h] = row[i] || '');
+                    return obj;
+                });
+                
+                const user = usuarios.find(u => u.Usuario === username && u.Contraseña === password && u.Estado === 'ACTIVO');
+                
+                if (user) {
+                    currentUser = user;
+                    await cargarDatos();
+                    document.getElementById('loginContainer').style.display = 'none';
+                    document.getElementById('appContainer').style.display = 'block';
+                    document.getElementById('userName').textContent = user.Nombre_Completo;
+                    mostrarPresupuestos();
+                } else {
+                    errorDiv.textContent = '❌ Usuario o contraseña incorrectos';
+                    errorDiv.style.display = 'block';
+                }
+            } catch (error) {
+                errorDiv.textContent = '❌ Error: ' + error.message;
+                errorDiv.style.display = 'block';
+            }
+        }
+        
+        // Funciones auxiliares para Google Sheets
+        // URL del Google Apps Script
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzfStdMds7uKO2zzSymEv1Y_pgTMhJx_ZtyEIFaAG_ARzNOcuRULEgA0R8zWxCVBntA/exec';
+        
+        async function escribir(hoja, valores) {
+            try {
+                console.log('Escribiendo en hoja:', hoja, 'valores:', valores);
+                const response = await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        action: 'append',
+                        hoja: hoja,
+                        valores: valores
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Error HTTP:', response.status, errorText);
+                    throw new Error(`Error HTTP ${response.status}: ${errorText}`);
+                }
+                
+                const result = await response.json();
+                console.log('Respuesta de Apps Script:', result);
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Error desconocido');
+                }
+                
+                return true;
+            } catch(e) { 
+                console.error('Error escribiendo en', hoja, ':', e);
+                return false; 
+            }
+        }
+        
+        async function actualizar(hoja, rango, valor) {
+            try {
+                console.log('Actualizando hoja:', hoja, 'rango:', rango, 'valor:', valor);
+                const response = await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        action: 'update',
+                        hoja: hoja,
+                        rango: rango,
+                        valor: valor
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Error HTTP:', response.status, errorText);
+                    throw new Error(`Error HTTP ${response.status}: ${errorText}`);
+                }
+                
+                const result = await response.json();
+                console.log('Respuesta de Apps Script:', result);
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Error desconocido');
+                }
+                
+                return true;
+            } catch(e) { 
+                console.error('Error actualizando:', e);
+                return false; 
+            }
+        }
+        
+        async function cargarDatos() {
+            const [p, c, it, pr] = await Promise.all([
+                fetch(`${BASE_URL}/values/PRESUPUESTOS?key=${API_KEY}`).then(r => r.json()),
+                fetch(`${BASE_URL}/values/CLIENTES?key=${API_KEY}`).then(r => r.json()),
+                fetch(`${BASE_URL}/values/ITEMS_PRESUPUESTO?key=${API_KEY}`).then(r => r.json()),
+                fetch(`${BASE_URL}/values/PRODUCTOS?key=${API_KEY}`).then(r => r.json())
+            ]);
+            
+            if (p.values) {
+                const h = p.values[0];
+                presupuestos = p.values.slice(1).map((r, i) => {
+                    const o = {_rowNum: i + 2}
+        ;
+
+                    h.forEach((k, j) => o[k] = r[j] || '');
+                    return o;
+                });
+            }
+            
+            if (c.values) {
+                const h = c.values[0];
+                clientes = c.values.slice(1).map((r, i) => {
+                    const o = {_rowNum: i + 2};
+                    h.forEach((k, j) => o[k] = r[j] || '');
+                    return o;
+                });
+            }
+            
+            if (it.values) {
+                const h = it.values[0];
+                const items = it.values.slice(1).map((r, i) => {
+                    const o = {_rowNum: i + 2};
+                    h.forEach((k, j) => o[k] = r[j] || '');
+                    return o;
+                });
+                presupuestos.forEach(p => p.items = items.filter(i => i.Presupuesto_ID === p.ID));
+                itemsCotizar = items;
+            }
+            
+            if (pr.values) {
+                const h = pr.values[0];
+                productos = pr.values.slice(1).map((r, i) => {
+                    const o = {_rowNum: i + 2};
+                    h.forEach((k, j) => o[k] = r[j] || '');
+                    return o;
+                });
+                console.log('Productos cargados:', productos.length);
+                console.log('Primer producto completo:', productos[0]);
+                console.log('====== COLUMNAS DE LA HOJA PRODUCTOS ======');
+                Object.keys(productos[0]).forEach(k => console.log('  -', k));
+                console.log('==========================================');
+                console.log('ID del primer producto:', productos[0].ID, '(tipo:', typeof productos[0].ID, ')');
+                console.log('Ejemplo precio:', productos[0]?.Precio, 'Tipo:', typeof productos[0]?.Precio);
+            }
+        }
+        
+        function mostrarPresupuestos() {
+            document.getElementById('moduleTitle').textContent = '📝 Presupuestos';
+            document.getElementById('menuContainer').innerHTML = `
+                <div style="padding:15px;background:rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarPresupuestos()">📝 Presupuestos</div>
+                <div style="padding:15px;border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarClientes()">👥 Clientes</div>
+                <div style="padding:15px;border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarCotizador()">💰 Cotizaciones</div>
+            `;
+            
+            let html = '<div class="toolbar"><input type="text" id="buscar" placeholder="🔍 Buscar presupuesto..." onkeyup="filtrarPres()" /><button class="btn btn-green" onclick="crearPres()">➕ NUEVO</button></div><div id="lista">';
+            
+            if (presupuestos.length === 0) {
+                html += '<div style="text-align:center;padding:60px;color:#999"><h3>Sin presupuestos</h3></div>';
+            } else {
+                presupuestos.forEach(p => {
+                    const t = (p.items || []).reduce((s, i) => s + parseInt(i.Precio_Total || 0), 0);
+                    const color = p.Estado === 'LISTO' ? 'verde' : 'rojo';
+                    html += `<div class="card ${color}" data-s="${p.Numero} ${p.Cliente_Nombre} ${p.Vehiculo}">
+                        <div style="display:flex;justify-content:space-between">
+                            <div style="flex:1">
+                                <h3>${p.Numero || 'N/A'} - ${p.Cliente_Nombre || 'N/A'}</h3>
+                                <p><strong>Vehículo:</strong> ${p.Vehiculo || 'N/A'}</p>
+                                <p><strong>Estado:</strong> ${p.Estado || 'N/A'}</p>
+                                <p><strong>Items:</strong> ${(p.items || []).length}</p>
+                            </div>
+                            <div style="text-align:right">
+                                <div style="background:#1C69D4;color:white;padding:15px;border-radius:10px">
+                                    <div style="font-size:20px;font-weight:700">₲ ${fmt(t)}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-top:15px;padding-top:15px;border-top:2px solid #f0f0f0">
+                            <button class="btn btn-blue" onclick="verPres('${p.ID}')">👁 VER</button>
+                            <button class="btn btn-orange" onclick="alert('Editar ${p.ID}')">✏️ EDITAR</button>
+                        </div>
+                    </div>`;
+                });
+            }
+            
+            html += '</div>';
+            document.getElementById('mainContent').innerHTML = html;
+            const listos = presupuestos.filter(p => p.Estado === 'LISTO').length;
+            const pendientes = presupuestos.filter(p => p.Estado === 'PENDIENTE_COTIZACION').length;
+            const enviados = presupuestos.filter(p => p.Estado === 'ENVIADO').length;
+            
+            document.getElementById('sidePanel').innerHTML = `
+                <div style="padding:20px">
+                    <h3 style="margin-bottom:15px">📊 Resumen</h3>
+                    <div style="background:#E8F5E9;padding:15px;border-radius:8px;margin-bottom:10px">
+                        <div style="font-size:32px;font-weight:700;color:#2ecc71">${listos}</div>
+                        <div style="font-size:12px">LISTOS</div>
+                    </div>
+                    <div style="background:#FFEBEE;padding:15px;border-radius:8px;margin-bottom:10px">
+                        <div style="font-size:32px;font-weight:700;color:#e74c3c">${pendientes}</div>
+                        <div style="font-size:12px">PENDIENTES</div>
+                    </div>
+                    <div style="background:#E3F2FD;padding:15px;border-radius:8px">
+                        <div style="font-size:32px;font-weight:700;color:#1C69D4">${enviados}</div>
+                        <div style="font-size:12px">ENVIADOS</div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function filtrarPres() {
+            const b = document.getElementById('buscar').value.toLowerCase();
+            document.querySelectorAll('#lista .card').forEach(c => {
+                const s = c.getAttribute('data-s');
+                if (s) c.style.display = s.toLowerCase().includes(b) ? 'block' : 'none';
+            });
+        }
+        
+        function fmt(n) {
+            // Convertir a número, quitando cualquier carácter no numérico excepto punto
+            const num = parseInt(String(n || 0).replace(/[^0-9]/g, '')) || 0;
+            return num.toLocaleString('es-PY');
+        }
+        
+        function crearPres() {
+            if (clientes.length === 0) {
+                alert('⚠️ No hay clientes. Crea un cliente primero.');
+                return;
+            }
+            
+            // Array temporal para items del presupuesto
+            window.itemsTemp = [];
+            
+            // Inicializar productos visibles con todos los productos
+            productosVisibles = productos.slice();
+            
+            const modal = document.createElement('div');
+            modal.id = 'modalCrearPres';
+            modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999';
+            modal.onclick = function() { if(confirm('¿Cancelar presupuesto?')) modal.remove(); };
+            
+            let opcionesClientes = '';
+            clientes.forEach(c => {
+                opcionesClientes += '<option value="' + c.Nombre + '">';
+            });
+            
+            modal.innerHTML = `
+                <div style="background:white;border-radius:12px;width:1200px;max-width:95%;max-height:95vh;overflow:hidden;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+                    <div style="background:#1C69D4;color:white;padding:20px;border-radius:12px 12px 0 0;flex-shrink:0">
+                        <h2>➕ NUEVO PRESUPUESTO</h2>
+                    </div>
+                    
+                    <div style="display:flex;flex:1;overflow:hidden">
+                        <!-- COLUMNA IZQUIERDA: Datos del presupuesto -->
+                        <div style="width:400px;padding:25px;border-right:2px solid #e0e0e0;overflow-y:auto">
+                            <h3 style="margin-bottom:15px">📋 Datos</h3>
+                            
+                            <div style="margin-bottom:15px">
+                                <label style="display:block;margin-bottom:8px;font-weight:600">Cliente *</label>
+                            <input 
+                                type="text" 
+                                id="nCliente" 
+                                list="listaClientes"
+                                placeholder="🔍 Escribe el nombre del cliente (nuevo o existente)..." 
+                                style="width:100%;padding:12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px" 
+                                onchange="if(typeof verificarClienteNuevo === 'function') verificarClienteNuevo()"
+                                autocomplete="off"
+                            />
+                            <datalist id="listaClientes">
+                                ${opcionesClientes}
+                            </datalist>
+                            <div id="divNuevoCliente" style="display:none;margin-top:10px;padding:10px;background:#E8F5E9;border-radius:8px;font-size:12px;color:#2e7d32">
+                                ✅ Se creará un nuevo cliente con este nombre
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom:15px">
+                                <label style="display:block;margin-bottom:8px;font-weight:600">Vehículo</label>
+                                <input type="text" id="nVeh" placeholder="Ej: BMW X5 2020" style="width:100%;padding:12px;border:2px solid #e0e0e0;border-radius:8px" />
+                            </div>
+                            
+                            <div style="margin-bottom:15px">
+                                <label style="display:block;margin-bottom:8px;font-weight:600">VIN / Chasis</label>
+                                <input type="text" id="nVIN" placeholder="Opcional" style="width:100%;padding:12px;border:2px solid #e0e0e0;border-radius:8px" />
+                            </div>
+                            
+                            <div style="margin-bottom:15px">
+                                <label style="display:block;margin-bottom:8px;font-weight:600">Notas</label>
+                                <textarea id="nNotas" placeholder="Observaciones..." style="width:100%;padding:12px;border:2px solid #e0e0e0;border-radius:8px" rows="3"></textarea>
+                            </div>
+                            
+                            <div style="background:#E3F2FD;padding:15px;border-radius:8px;margin-top:20px">
+                                <div style="font-size:12px;color:#666;margin-bottom:5px">TOTAL</div>
+                                <div id="totalTemp" style="font-size:32px;font-weight:700;color:#1C69D4">₲ 0</div>
+                                <div style="font-size:12px;color:#666;margin-top:5px" id="cantItemsTemp">0 items</div>
+                            </div>
+                        </div>
+                        
+                        <!-- COLUMNA DERECHA: Buscador de piezas e items -->
+                        <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+                            <div style="padding:25px;border-bottom:2px solid #e0e0e0;flex-shrink:0">
+                                <h3 style="margin-bottom:15px">🔍 Buscar y Agregar Piezas</h3>
+                                <input type="text" id="buscarPiezaTemp" placeholder="🔍 Buscar por nombre, OEM, marca..." onkeyup="filtrarPiezasTemp()" style="width:100%;padding:12px;border:2px solid #ddd;border-radius:8px;font-size:14px" />
+                            </div>
+                            
+                            <div style="flex:1;overflow-y:auto;padding:15px" id="listaPiezasTemp"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Items agregados -->
+                    <div style="border-top:2px solid #e0e0e0;padding:15px;height:180px;overflow-y:auto;background:#f8f9fa;flex-shrink:0">
+                        <h3 style="margin-bottom:10px;font-size:14px">📦 Items Agregados (<span id="contadorItems">0</span>)</h3>
+                        <div id="listaItemsTemp"></div>
+                    </div>
+                    
+                    <div style="padding:20px;border-top:2px solid #e0e0e0;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+                        <div id="mensajeCotizacion" style="display:none;color:#f39c12;font-weight:600;font-size:13px">
+                            ⚠️ Hay items pendientes de cotización
+                        </div>
+                        <div style="margin-left:auto">
+                            <button onclick="document.getElementById('modalCrearPres').remove()" class="btn" style="background:#999;color:white;padding:12px 24px;border:none;border-radius:8px;cursor:pointer;margin:5px;font-weight:600">CANCELAR</button>
+                            <button id="btnEnviarCotizacion" onclick="enviarACotizacion()" class="btn" style="background:#f39c12;color:white;padding:12px 24px;border:none;border-radius:8px;cursor:pointer;margin:5px;font-weight:600;display:none">🔍 ENVIAR A COTIZACIÓN</button>
+                            <button id="btnCrearPresupuesto" onclick="guardarPresCompleto()" class="btn btn-green" style="padding:12px 24px;border:none;border-radius:8px;cursor:pointer;margin:5px;font-weight:600">✅ CREAR PRESUPUESTO</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            mostrarPiezasTemp();
+        }
+        
+        function mostrarPiezasTemp() {
+            let html = '';
+            
+            if (productosVisibles.length === 0) {
+                html = '<div style="text-align:center;padding:40px;color:#999"><p>No se encontraron productos</p></div>';
+            } else {
+                productosVisibles.forEach((prod, index) => {
+                    const stockColor = (prod.Stock && parseInt(prod.Stock) > 0) ? '#2ecc71' : '#e74c3c';
+                    html += `<div class="pieza-temp" data-search="${prod.Nombre} ${prod.OEM} ${prod.Marca}" style="background:white;padding:12px;margin:8px 0;border-radius:8px;border:2px solid #e0e0e0;transition:all 0.2s">
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:15px">
+                            <div style="flex:1">
+                                <div style="font-weight:600;margin-bottom:3px">${prod.Nombre}</div>
+                                <div style="font-size:11px;color:#666">OEM: ${prod.OEM} | ${prod.Marca || 'N/A'}</div>
+                            </div>
+                            <div style="text-align:right">
+                                <div style="font-size:16px;font-weight:700;color:#1C69D4">₲ ${fmt(prod.Precio || 0)}</div>
+                                <div style="font-size:11px;font-weight:600;color:${stockColor}">Stock: ${prod.Stock || 0}</div>
+                            </div>
+                            <button class="btn-agregar-pieza" data-index="${index}" style="background:#2ecc71;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;white-space:nowrap">➕ AGREGAR</button>
+                        </div>
+                    </div>`;
+                });
+            }
+            
+            html += `<div style="background:#FFF3CD;padding:15px;margin:15px 0;border-radius:8px;text-align:center;border:2px dashed #f39c12;cursor:pointer" onclick="cotizarPiezaSinStock()">
+                        <h4 style="color:#856404;margin-bottom:5px">🔍 ¿No encuentras la pieza?</h4>
+                        <p style="font-size:12px;color:#856404">Click aquí para cotizar una pieza que no está en el catálogo</p>
+                    </div>`;
+                document.getElementById('listaPiezasTemp').innerHTML = html;
+            
+            // Agregar event listeners a los botones después de crear el HTML
+            setTimeout(() => {
+                document.querySelectorAll('.btn-agregar-pieza').forEach(btn => {
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const index = this.getAttribute('data-index');
+                        agregarItemTemp(index);
+                    };
+                });
+            }, 100);
+        }
+        
+        let busquedaTimeout;
+        
+        function filtrarPiezasTemp() {
+            clearTimeout(busquedaTimeout);
+            busquedaTimeout = setTimeout(() => {
+                const busqueda = document.getElementById('buscarPiezaTemp').value.toLowerCase();
+                
+                if (!busqueda) {
+                    productosVisibles = productos.slice();
+                    mostrarPiezasTemp();
+                } else {
+                    productosVisibles = productos.filter(p => {
+                        const texto = `${p.Nombre} ${p.OEM} ${p.Marca}`.toLowerCase();
+                        return texto.includes(busqueda);
+                    });
+                    mostrarPiezasTemp();
+                }
+            }, 300); // Espera 300ms después de dejar de escribir
+        }
+        
+        function agregarItemTemp(index) {
+            try {
+                console.log('=== AGREGAR ITEM ===');
+                const idx = parseInt(index);
+                const prod = productosVisibles[idx];
+                
+                if (!prod) {
+                    alert('ERROR: No se encontró el producto');
+                    return;
+                }
+                
+                console.log('Producto encontrado:', prod.Nombre);
+                
+                // Verificar stock
+                const stock = parseInt(prod.Stock || 0);
+                const sinStock = stock === 0;
+                
+                // Pedir cantidad
+                const cantidadStr = prompt('Cantidad:', '1');
+                if (!cantidadStr) return;
+                
+                const cantidad = parseInt(cantidadStr);
+                if (cantidad <= 0 || isNaN(cantidad)) {
+                    alert('Cantidad inválida');
+                    return;
+                }
+                
+                let item;
+                
+                if (sinStock) {
+                    // PRODUCTO SIN STOCK - Agregar solo OEM, nombre, cantidad
+                    if (confirm(`⚠️ Este producto NO tiene stock.\n\n¿Agregar a COTIZACIÓN?\n\nSe agregará sin precio para que el equipo de compras lo cotice.`)) {
+                        item = {
+                            id: Date.now(),
+                            prodSKU: prod.SKU,
+                            nombre: prod.Nombre,
+                            oem: prod.OEM,
+                            cantidad: cantidad,
+                            precio: 0,
+                            total: 0,
+                            sinStock: true,
+                            marca: prod.Marca || ''
+                        };
+                        console.log('✅ Item SIN STOCK agregado para cotización');
+                    } else {
+                        return;
+                    }
+                } else {
+                    // PRODUCTO CON STOCK - Agregar con precio normal
+                    let precioStr = String(prod.Precio || '0').replace(/[.,\s]/g, '');
+                    const precio = parseInt(precioStr);
+                    
+                    if (precio <= 0 || isNaN(precio)) {
+                        alert('⚠️ Este producto no tiene precio configurado');
+                        return;
+                    }
+                    
+                    item = {
+                        id: Date.now(),
+                        prodSKU: prod.SKU,
+                        nombre: prod.Nombre,
+                        oem: prod.OEM,
+                        cantidad: cantidad,
+                        precio: precio,
+                        total: cantidad * precio,
+                        marca: prod.Marca || ''
+                    };
+                    console.log('✅ Item con stock agregado');
+                }
+                
+                if (!window.itemsTemp) window.itemsTemp = [];
+                window.itemsTemp.push(item);
+                actualizarListaItemsTemp();
+                
+            } catch(error) {
+                console.error('ERROR:', error);
+                alert('ERROR: ' + error.message);
+            }
+        }
+        
+        
+        
+        function actualizarListaItemsTemp() {
+            let html = '';
+            let total = 0;
+            let hayPendientes = false;
+            
+            if (window.itemsTemp.length === 0) {
+                html = '<p style="text-align:center;color:#999;padding:20px">No hay items</p>';
+            } else {
+                html = `<table style="width:100%;border-collapse:collapse;font-size:11px">
+                    <thead style="background:#1C69D4;color:white">
+                        <tr>
+                            <th style="padding:6px;text-align:center;width:60px">FOTO</th>
+                            <th style="padding:6px;text-align:left">PIEZA</th>
+                            <th style="padding:6px;text-align:center;width:60px">CANT</th>
+                            <th style="padding:6px;text-align:right;width:80px">P.UNIT</th>
+                            <th style="padding:6px;text-align:right;width:90px">TOTAL</th>
+                            <th style="padding:6px;text-align:center;width:50px">STOCK</th>
+                            <th style="padding:6px;text-align:center;width:120px">DISPONIB.</th>
+                            <th style="padding:6px;text-align:center;width:80px">UBIC.</th>
+                            <th style="padding:6px;text-align:center;width:80px">ACC.</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+                
+                window.itemsTemp.forEach((item, idx) => {
+                    total += item.total;
+                    const prod = productosVisibles ? productosVisibles.find(p => p.SKU === item.prodSKU) : null;
+                    const prodFull = prod || (productos ? productos.find(p => p.SKU === item.prodSKU) : null);
+                    
+                    // Determinar si es item a cotizar
+                    const pendiente = item.sinStock || item.precio === 0;
+                    if (pendiente) hayPendientes = true;
+                    
+                    // Para items a cotizar, NO mostrar datos del producto (pueden cambiar)
+                    const stock = pendiente ? 0 : (prodFull ? parseInt(prodFull.Stock || 0) : 0);
+                    const ubicacion = pendiente ? '-' : (prodFull ? (prodFull.Ubicacion || '-') : '-');
+                    const imagenUrl = pendiente ? '' : (prodFull ? (prodFull.Imagen_URL || '') : '');
+                    const excede = !pendiente && (item.cantidad > stock);
+                    
+                    let disp = '';
+                    let dispColor = '#666';
+                    if (pendiente) {
+                        disp = '❓ A COTIZAR';
+                        dispColor = '#f39c12';
+                    } else if (stock >= item.cantidad) {
+                        disp = '✅ Inmediato';
+                        dispColor = '#2ecc71';
+                    } else if (stock > 0) {
+                        disp = `⚠️ Parcial (${stock})`;
+                        dispColor = '#e67e22';
+                    } else {
+                        disp = '❌ Sin stock';
+                        dispColor = '#e74c3c';
+                    }
+                    
+                    // Fondo amarillo para items a cotizar
+                    const bgColor = pendiente ? '#FFF9E6' : (excede ? '#fff5f5' : 'white');
+                    
+                    html += `<tr style="border-bottom:1px solid #e0e0e0;background:${bgColor}">
+                        <td style="padding:6px;text-align:center">
+                            ${pendiente ? `<div style="width:50px;height:50px;background:#f39c12;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:20px;color:white">❓</div>` : (imagenUrl ? `<img src="${imagenUrl}" style="width:50px;height:50px;object-fit:cover;border-radius:4px;cursor:pointer" onclick="window.open('${imagenUrl}','_blank')" title="Click para ampliar">` : `<div style="width:50px;height:50px;background:#f0f0f0;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:20px">📦</div>`)}
+                        </td>
+                        <td style="padding:6px">
+                            <div style="font-weight:600">${item.nombre}</div>
+                            <div style="font-size:9px;color:#666">OEM: ${item.oem}</div>
+                            ${pendiente ? `<div style="font-size:9px;color:#f39c12;font-weight:600">⚠️ PENDIENTE DE COTIZACIÓN</div>` : ''}
+                        </td>
+                        <td style="padding:6px;text-align:center">
+                            <input type="number" value="${item.cantidad}" min="1" onchange="editarCantidadItem(${idx},this.value)" 
+                                style="width:45px;padding:3px;border:1px solid ${excede?'#e74c3c':'#ddd'};border-radius:3px;text-align:center;font-weight:600;color:${excede?'#e74c3c':'#333'}">
+                        </td>
+                        <td style="padding:6px;text-align:right">
+                            ${pendiente ? `<span style="color:#f39c12;font-weight:600;font-size:10px">A COTIZAR</span>` : `<input type="number" value="${item.precio}" min="0" onchange="editarPrecioItem(${idx},this.value)" style="width:70px;padding:3px;border:1px solid #ddd;border-radius:3px;text-align:right">`}
+                        </td>
+                        <td style="padding:6px;text-align:right;font-weight:700;color:${pendiente?'#f39c12':'#1C69D4'}">${pendiente ? 'A COTIZAR' : '₲'+fmt(item.total)}</td>
+                        <td style="padding:6px;text-align:center;font-weight:700;font-size:14px;color:${pendiente?'#f39c12':(stock===0?'#e74c3c':(excede?'#e74c3c':'#2ecc71'))}">${pendiente ? '-' : stock}</td>
+                        <td style="padding:6px;text-align:center;font-size:10px;font-weight:600;color:${dispColor}">${disp}</td>
+                        <td style="padding:6px;text-align:center;color:#666;font-size:10px">${pendiente ? '-' : ubicacion}</td>
+                        <td style="padding:6px;text-align:center">
+                            ${!pendiente ? `<button onclick="copiarItemWhatsApp(${idx})" title="WhatsApp" style="background:#25D366;color:white;border:none;padding:3px 6px;border-radius:3px;cursor:pointer;margin:1px;font-size:10px">📱</button>` : ''}
+                            <button onclick="eliminarItemTemp(${idx})" title="Eliminar" style="background:#e74c3c;color:white;border:none;padding:3px 6px;border-radius:3px;cursor:pointer;margin:1px;font-size:10px">✕</button>
+                        </td>
+                    </tr>`;
+                });
+                
+                html += `</tbody></table>`;
+            }
+            
+            document.getElementById('listaItemsTemp').innerHTML = html;
+            document.getElementById('totalTemp').textContent = '₲ ' + fmt(total);
+            document.getElementById('cantItemsTemp').textContent = window.itemsTemp.length + ' items';
+            document.getElementById('contadorItems').textContent = window.itemsTemp.length;
+            window.hayPendientes = hayPendientes;
+            
+            // Mostrar/ocultar botones según haya items pendientes
+            const btnCotizar = document.getElementById('btnEnviarCotizacion');
+            const btnCrear = document.getElementById('btnCrearPresupuesto');
+            const mensaje = document.getElementById('mensajeCotizacion');
+            
+            if (btnCotizar && btnCrear && mensaje) {
+                if (hayPendientes) {
+                    btnCotizar.style.display = 'inline-block';
+                    btnCrear.style.display = 'none';
+                    mensaje.style.display = 'block';
+                } else {
+                    btnCotizar.style.display = 'none';
+                    btnCrear.style.display = 'inline-block';
+                    mensaje.style.display = 'none';
+                }
+            }
+        }
+        
+        function editarCantidadItem(idx, val) {
+            const c = parseInt(val);
+            if (c > 0 && !isNaN(c)) {
+                window.itemsTemp[idx].cantidad = c;
+                window.itemsTemp[idx].total = c * window.itemsTemp[idx].precio;
+                actualizarListaItemsTemp();
+            }
+        }
+        
+        function editarPrecioItem(idx, val) {
+            const p = parseInt(val);
+            if (p >= 0 && !isNaN(p)) {
+                window.itemsTemp[idx].precio = p;
+                window.itemsTemp[idx].total = window.itemsTemp[idx].cantidad * p;
+                actualizarListaItemsTemp();
+            }
+        }
+        
+        function copiarItemWhatsApp(idx) {
+            const item = window.itemsTemp[idx];
+            const prod = productos ? productos.find(p => p.SKU === item.prodSKU) : null;
+            const stock = prod ? parseInt(prod.Stock || 0) : 0;
+            let txt = `*${item.nombre}*\nOEM: ${item.oem}\nCant: ${item.cantidad}\nPrecio: ₲${fmt(item.precio)}\nTotal: ₲${fmt(item.total)}\n`;
+            if (stock >= item.cantidad) txt += `✅ Disponible, entrega inmediata`;
+            else if (stock > 0) txt += `⚠️ Stock parcial: ${stock}`;
+            else txt += `❌ Sin stock`;
+            if (prod && prod.Ubicacion) txt += `\nUbicación: ${prod.Ubicacion}`;
+            if (prod && prod.Imagen_URL) txt += `\nImagen: ${prod.Imagen_URL}`;
+            navigator.clipboard.writeText(txt).then(() => alert('📋 Item copiado al portapapeles'));
+        }
+        
+        function eliminarItemTemp(idx) {
+            window.itemsTemp.splice(idx, 1);
+            actualizarListaItemsTemp();
+        }
+        
+        
+        function cotizarPiezaSinStock() {
+            const nombre = prompt('Nombre de la pieza:');
+            if (!nombre) return;
+            
+            const oem = prompt('Código OEM:');
+            if (!oem) return;
+            
+            const cantidad = prompt('Cantidad:', '1');
+            if (!cantidad || cantidad <= 0) return;
+            
+            const item = {
+                id: Date.now(),
+                prodId: 'SIN_STOCK',
+                nombre: nombre,
+                oem: oem,
+                cantidad: parseInt(cantidad),
+                precio: 0,
+                total: 0,
+                sinStock: true
+            };
+            
+            window.itemsTemp.push(item);
+            actualizarListaItemsTemp();
+            
+            alert('✅ Item agregado. Será cotizado posteriormente.');
+        }
+        
+        
+        async function enviarACotizacion() {
+            if (!window.itemsTemp || window.itemsTemp.length === 0) {
+                alert('❌ No hay items para enviar');
+                return;
+            }
+            
+            const itemsPendientes = window.itemsTemp.filter(i => i.sinStock || i.precio === 0);
+            
+            if (itemsPendientes.length === 0) {
+                alert('❌ No hay items pendientes de cotización');
+                return;
+            }
+            
+            if (!confirm(`🔍 SE ENVIARÁN ${itemsPendientes.length} ITEM(S) A COTIZACIÓN\n\n¿Confirmar?`)) {
+                return;
+            }
+            
+            // Mostrar loading
+            const btnCotizar = document.getElementById('btnEnviarCotizacion');
+            const textoOriginal = btnCotizar.textContent;
+            btnCotizar.textContent = '⏳ Guardando...';
+            btnCotizar.disabled = true;
+            
+            try {
+                // Guardar el presupuesto
+                await guardarPresCompleto();
+                
+                // Cerrar modal si existe
+                const modal = document.getElementById('modalCrearPres');
+                if (modal) {
+                    modal.remove();
+                }
+                
+                // Recargar datos
+                await cargarDatos();
+                
+                // Mostrar presupuestos
+                mostrarPresupuestos();
+                
+                // Mensaje de éxito
+                alert('✅ PRESUPUESTO ENVIADO A COTIZACIÓN\n\nLos items sin stock fueron marcados para cotización.');
+                
+            } catch(error) {
+                console.error('Error:', error);
+                alert('❌ Error al guardar: ' + error.message);
+                btnCotizar.textContent = textoOriginal;
+                btnCotizar.disabled = false;
+            }
+        }
+        
+        async function guardarPresCompleto() {
+            try {
+                const nombreCliente = document.getElementById('nCliente').value;
+                const veh = document.getElementById('nVeh').value;
+                
+                if (!nombreCliente || !nombreCliente.trim()) {
+                    alert('❌ Ingrese el nombre del cliente');
+                    return;
+                }
+                
+                let cid = '';
+                let cnombre = nombreCliente.trim();
+                
+                // Buscar si el cliente existe
+                const clienteExiste = clientes.find(c => c.Nombre === cnombre);
+                if (clienteExiste) {
+                    cid = clienteExiste.ID;
+                } else {
+                    cid = '';
+                }
+                
+                if (window.itemsTemp.length === 0) {
+                    alert('❌ Agregue al menos un item al presupuesto');
+                    return;
+                }
+                
+                // Verificar que escribir existe
+                if (typeof escribir !== 'function') {
+                    throw new Error('La función escribir no está disponible. Recarga la página.');
+                }
+                
+                // Crear presupuesto
+                const nid = (presupuestos.length + 1).toString();
+                const num = 'P-2026-' + String(nid).padStart(3, '0');
+                
+                console.log('Guardando presupuesto...');
+                
+                const ok = await escribir('PRESUPUESTOS', [
+                    nid, num, cid, cnombre, veh || '',
+                    document.getElementById('nVIN').value,
+                    'PENDIENTE_COTIZACION',
+                    new Date().toISOString().split('T')[0],
+                    '', currentUser.ID || '', currentUser.Nombre_Completo || '', '0',
+                    document.getElementById('nNotas').value
+                ]);
+                
+                if (!ok) {
+                    throw new Error('No se pudo guardar el presupuesto en Google Sheets');
+                }
+                
+                console.log('Presupuesto guardado, guardando items...');
+                
+                // Crear items
+                for (let i = 0; i < window.itemsTemp.length; i++) {
+                    const item = window.itemsTemp[i];
+                    const itemId = (itemsCotizar.length + 1 + i).toString();
+                    
+                    console.log(`Guardando item ${i+1} de ${window.itemsTemp.length}`);
+                    
+                    await escribir('ITEMS_PRESUPUESTO', [
+                        itemId, nid, item.nombre, item.oem, item.cantidad,
+                        '', '', item.precio, item.total, 
+                        item.sinStock ? 'SIN_STOCK' : 'DISP', 
+                        '', '', '', '', 
+                        item.sinStock ? 'PENDIENTE' : 'PENDIENTE'
+                    ]);
+                }
+                
+                console.log('✅ Todo guardado correctamente');
+                
+                alert('✅ Presupuesto creado con ' + window.itemsTemp.length + ' items');
+                
+                // Cerrar modal si existe
+                const modal = document.getElementById('modalCrearPres');
+                if (modal) {
+                    modal.remove();
+                }
+                
+                await cargarDatos();
+                mostrarPresupuestos();
+                
+            } catch(error) {
+                console.error('ERROR en guardarPresCompleto:', error);
+                alert('❌ ERROR al guardar:\n\n' + error.message + '\n\nAbre la consola (F12) para más detalles.');
+                throw error; // Re-lanzar para que enviarACotizacion lo capture
+            }
+        }
+        
+        
+        
+        document.getElementById('loginForm').addEventListener('submit', login);
+    
+        function mostrarClientes() {
+            document.getElementById('moduleTitle').textContent = '👥 Clientes';
+            document.getElementById('menuContainer').innerHTML = `
+                <div style="padding:15px;border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarPresupuestos()">📝 Presupuestos</div>
+                <div style="padding:15px;background:rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarClientes()">👥 Clientes</div>
+                <div style="padding:15px;border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarCotizador()">💰 Cotizaciones</div>
+            `;
+            
+            let html = '<div class="toolbar"><input type="text" id="buscarC" placeholder="🔍 Buscar cliente..." onkeyup="filtrarC()" /><button class="btn btn-green" onclick="alert(\'Crear cliente\')">➕ NUEVO</button></div><div id="listaC">';
+            
+            if (clientes.length === 0) {
+                html += '<div style="text-align:center;padding:60px;color:#999"><h3>Sin clientes</h3></div>';
+            } else {
+                clientes.forEach(c => {
+                    html += `<div class="card">
+                        <h3>${c.Nombre}</h3>
+                        <p><strong>RUC:</strong> ${c.RUC || 'N/A'}</p>
+                        <p><strong>Teléfono:</strong> ${c.Telefono || 'N/A'}</p>
+                    </div>`;
+                });
+            }
+            
+            html += '</div>';
+            document.getElementById('mainContent').innerHTML = html;
+            document.getElementById('sidePanel').innerHTML = '<div style="padding:20px"><h3>Total: ' + clientes.length + '</h3></div>';
+        }
+        
+        function filtrarC() {
+            const b = document.getElementById('buscarC').value.toLowerCase();
+            document.querySelectorAll('#listaC .card').forEach(c => {
+                const texto = c.textContent.toLowerCase();
+                c.style.display = texto.includes(b) ? 'block' : 'none';
+            });
+        }
+        
+        function mostrarCotizador() {
+            document.getElementById('moduleTitle').textContent = '💰 Cotizaciones';
+            document.getElementById('menuContainer').innerHTML = `
+                <div style="padding:15px;border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarPresupuestos()">📝 Presupuestos</div>
+                <div style="padding:15px;border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarClientes()">👥 Clientes</div>
+                <div style="padding:15px;background:rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarCotizador()">💰 Cotizaciones</div>
+            `;
+            
+            const pendientes = itemsCotizar.filter(i => i.Estado_Item === 'PENDIENTE');
+            const cotizados = itemsCotizar.filter(i => i.Estado_Item === 'COTIZADO');
+            
+            let html = `
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:20px">
+                    <div class="card" style="text-align:center;border-left:4px solid #e74c3c">
+                        <div style="font-size:36px;font-weight:700;color:#e74c3c">${pendientes.length}</div>
+                        <div style="font-size:12px;color:#666">PENDIENTES</div>
+                    </div>
+                    <div class="card" style="text-align:center;border-left:4px solid #2ecc71">
+                        <div style="font-size:36px;font-weight:700;color:#2ecc71">${cotizados.length}</div>
+                        <div style="font-size:12px;color:#666">COTIZADOS</div>
+                    </div>
+                    <div class="card" style="text-align:center;border-left:4px solid #1C69D4">
+                        <div style="font-size:36px;font-weight:700;color:#1C69D4">${itemsCotizar.length}</div>
+                        <div style="font-size:12px;color:#666">TOTAL ITEMS</div>
+                    </div>
+                </div>
+                <h2>📋 Items Pendientes (${pendientes.length})</h2>
+            `;
+            
+            if (pendientes.length === 0) {
+                html += '<div style="text-align:center;padding:60px;color:#999"><h3>✅ No hay items pendientes</h3></div>';
+            } else {
+                pendientes.forEach(it => {
+                    const pr = presupuestos.find(p => p.ID === it.Presupuesto_ID);
+                    html += `<div class="card" style="border-left:4px solid #f39c12">
+                        <div style="display:flex;justify-content:space-between">
+                            <div style="flex:1">
+                                <h3>${it.Nombre_Pieza}</h3>
+                                <p><strong>OEM:</strong> ${it.OEM}</p>
+                                <p><strong>Presupuesto:</strong> ${pr ? pr.Numero + ' - ' + pr.Cliente_Nombre : 'N/A'}</p>
+                                <p><strong>Vehículo:</strong> ${pr ? pr.Vehiculo : ''}</p>
+                            </div>
+                            <div style="text-align:center;background:#f39c12;color:white;padding:15px;border-radius:10px;min-width:100px">
+                                <div style="font-size:32px;font-weight:700">${it.Cantidad}</div>
+                                <div style="font-size:11px">CANTIDAD</div>
+                            </div>
+                        </div>
+                        <div style="margin-top:15px;padding-top:15px;border-top:2px solid #f0f0f0">
+                            <button class="btn btn-blue" onclick="cotizarItem('${it.ID}')">💰 COTIZAR</button>
+                        </div>
+                    </div>`;
+                });
+            }
+            
+            document.getElementById('mainContent').innerHTML = html;
+            document.getElementById('sidePanel').innerHTML = `
+                <div style="padding:20px">
+                    <h3 style="margin-bottom:15px">📊 Resumen</h3>
+                    <div style="background:#FFEBEE;padding:15px;border-radius:8px;margin:10px 0">
+                        <div style="font-size:24px;font-weight:700;color:#e74c3c">${pendientes.length}</div>
+                        <div style="font-size:12px">Pendientes</div>
+                    </div>
+                    <div style="background:#E8F5E9;padding:15px;border-radius:8px">
+                        <div style="font-size:24px;font-weight:700;color:#2ecc71">${cotizados.length}</div>
+                        <div style="font-size:12px">Cotizados</div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        async function cotizarItem(itemId) {
+            const item = itemsCotizar.find(i => i.ID === itemId);
+            if (!item) return;
+            
+            const precio = prompt('Precio de venta (₲):', '0');
+            if (!precio) return;
+            
+            const disp = prompt('Disponibilidad:\nDISP = Disponible\n10D = 10 días\n15D = 15 días\n30D = 30 días', 'DISP');
+            if (!disp) return;
+            
+            const total = parseInt(precio) * parseInt(item.Cantidad);
+            
+            const ok1 = await actualizar('ITEMS_PRESUPUESTO', 'H' + item._rowNum, precio);
+            const ok2 = await actualizar('ITEMS_PRESUPUESTO', 'I' + item._rowNum, total);
+            const ok3 = await actualizar('ITEMS_PRESUPUESTO', 'J' + item._rowNum, disp);
+            const ok4 = await actualizar('ITEMS_PRESUPUESTO', 'O' + item._rowNum, 'COTIZADO');
+            
+            if (ok1 && ok2 && ok3 && ok4) {
+                alert('✅ Item cotizado exitosamente');
+                await cargarDatos();
+                mostrarCotizador();
+            } else {
+                alert('❌ Error al cotizar item');
+            }
+        }
+        
+        function copiarWhatsApp(presId) {
+            const p = presupuestos.find(x => x.ID === presId);
+            if (!p) return;
+            
+            const t = (p.items || []).reduce((s, i) => s + parseInt(i.Precio_Total || 0), 0);
+            
+            let texto = `*PRESUPUESTO ${p.Numero}*\n\n`;
+            texto += `*Cliente:* ${p.Cliente_Nombre}\n`;
+            texto += `*Vehículo:* ${p.Vehiculo}\n`;
+            texto += `*Fecha:* ${p.Fecha_Creacion}\n\n`;
+            texto += `*ITEMS:*\n`;
+            texto += `────────────────────\n`;
+            
+            (p.items || []).forEach(i => {
+                texto += `\n📦 *${i.Nombre_Pieza}*\n`;
+                texto += `   OEM: ${i.OEM}\n`;
+                texto += `   Cantidad: ${i.Cantidad}\n`;
+                texto += `   Precio Unit: ₲ ${fmt(i.Precio_Unitario || 0)}\n`;
+                texto += `   Total: ₲ ${fmt(i.Precio_Total || 0)}\n`;
+                texto += `   ${DISP[i.Disponibilidad] || i.Disponibilidad}\n`;
+            });
+            
+            texto += `\n────────────────────\n`;
+            texto += `*TOTAL: ₲ ${fmt(t)}*\n\n`;
+            texto += `_Bavarian Motors - BMW & Mini Cooper_`;
+            
+            navigator.clipboard.writeText(texto).then(() => {
+                alert('📋 Presupuesto copiado al portapapeles\n\n¡Ahora puedes pegarlo en WhatsApp!');
+            });
+        }
+        
+
+        
+        function agregarItemPres(presId) {
+            // Similar a crearPres pero solo para agregar items
+            window.itemsTemp = [];
+            
+            const modal = document.createElement('div');
+            modal.id = 'modalAgregarItem';
+            modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:10000';
+            modal.onclick = function() { if(confirm('¿Cancelar?')) modal.remove(); };
+            
+            modal.innerHTML = `
+                <div style="background:white;border-radius:12px;width:900px;max-width:95%;max-height:95vh;overflow:hidden;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+                    <div style="background:#2ecc71;color:white;padding:20px;border-radius:12px 12px 0 0">
+                        <h2>➕ AGREGAR ITEMS AL PRESUPUESTO</h2>
+                    </div>
+                    
+                    <div style="padding:25px;border-bottom:2px solid #e0e0e0">
+                        <input type="text" id="buscarPiezaAgregar" placeholder="🔍 Buscar pieza..." onkeyup="filtrarPiezasAgregar()" style="width:100%;padding:12px;border:2px solid #ddd;border-radius:8px;font-size:14px" />
+                    </div>
+                    
+                    <div style="flex:1;overflow-y:auto;padding:15px" id="listaPiezasAgregar"></div>
+                    
+                    <div style="border-top:2px solid #e0e0e0;padding:20px;background:#f8f9fa">
+                        <h3 style="margin-bottom:10px">Items a agregar: <span id="contadorAgregar">0</span></h3>
+                        <div id="listaItemsAgregar"></div>
+                    </div>
+                    
+                    <div style="padding:20px;border-top:2px solid #e0e0e0;text-align:right">
+                        <button onclick="document.getElementById('modalAgregarItem').remove()" class="btn" style="background:#999;color:white;padding:12px 24px;border:none;border-radius:8px;cursor:pointer;margin:5px;font-weight:600">CANCELAR</button>
+                        <button onclick="guardarItemsAgregados('${presId}')" class="btn btn-green" style="padding:12px 24px;border:none;border-radius:8px;cursor:pointer;margin:5px;font-weight:600">✅ AGREGAR ITEMS</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            mostrarPiezasAgregar();
+        }
+        
+        function mostrarPiezasAgregar() {
+            let html = '';
+            
+            productos.forEach(prod => {
+                const precioCorregido = prod.Precio || 0;
+                const stockColor = (prod.Stock && parseInt(prod.Stock) > 0) ? '#2ecc71' : '#e74c3c';
+                html += `<div class="pieza-agregar" data-search="${prod.Nombre} ${prod.OEM} ${prod.Marca}" style="background:white;padding:12px;margin:8px 0;border-radius:8px;border:2px solid #e0e0e0">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:15px">
+                        <div style="flex:1">
+                            <div style="font-weight:600;margin-bottom:3px">${prod.Nombre}</div>
+                            <div style="font-size:11px;color:#666">OEM: ${prod.OEM}</div>
+                        </div>
+                        <div style="text-align:right">
+                            <div style="font-size:16px;font-weight:700;color:#1C69D4">₲ ${fmt(precioCorregido)}</div>
+                            <div style="font-size:11px;font-weight:600;color:${prod.Stock > 0 ? '#2ecc71' : '#e74c3c'}">Stock: ${prod.Stock || 0}</div>
+                            <div style="font-size:11px;font-weight:600;color:${stockColor}">Stock: ${prod.Stock || 0}</div>
+                        </div>
+                        <button onclick="agregarItemTempAgregar('${prod.SKU}')" style="background:#2ecc71;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;white-space:nowrap">➕ AGREGAR</button>
+                    </div>
+                </div>`;
+            });
+            
+            html += `<div style="background:#FFF3CD;padding:15px;margin:15px 0;border-radius:8px;text-align:center;border:2px dashed #f39c12;cursor:pointer" onclick="cotizarPiezaSinStockAgregar()">
+                <h4 style="color:#856404">🔍 ¿No encuentras la pieza?</h4>
+                <p style="font-size:12px;color:#856404">Cotizar pieza no disponible</p>
+            </div>`;
+            
+            document.getElementById('listaPiezasAgregar').innerHTML = html;
+        }
+        
+        function filtrarPiezasAgregar() {
+            const busqueda = document.getElementById('buscarPiezaAgregar').value.toLowerCase();
+            document.querySelectorAll('.pieza-agregar').forEach(item => {
+                const texto = item.getAttribute('data-search').toLowerCase();
+                item.style.display = texto.includes(busqueda) ? 'block' : 'none';
+            });
+        }
+        
+        function agregarItemTempAgregar(prodId) {
+            const prod = productos.find(p => p.ID === prodId);
+            if (!prod) return;
+            
+            const cantidad = prompt('Cantidad:', '1');
+            if (!cantidad || cantidad <= 0) return;
+            
+            const precioCorregido = prod.Precio || 0;
+            const precio = prompt('Precio unitario:', precioCorregido);
+            if (!precio) return;
+            
+            const item = {
+                id: Date.now(),
+                prodId: prodId,
+                nombre: prod.Nombre,
+                oem: prod.OEM,
+                cantidad: parseInt(cantidad),
+                precio: parseInt(precio),
+                total: parseInt(cantidad) * parseInt(precio)
+            };
+            
+            window.itemsTemp.push(item);
+            actualizarListaItemsAgregar();
+        }
+        
+        function cotizarPiezaSinStockAgregar() {
+            const nombre = prompt('Nombre de la pieza:');
+            if (!nombre) return;
+            
+            const oem = prompt('Código OEM:');
+            if (!oem) return;
+            
+            const cantidad = prompt('Cantidad:', '1');
+            if (!cantidad) return;
+            
+            const item = {
+                id: Date.now(),
+                prodId: 'SIN_STOCK',
+                nombre: nombre,
+                oem: oem,
+                cantidad: parseInt(cantidad),
+                precio: 0,
+                total: 0,
+                sinStock: true
+            };
+            
+            window.itemsTemp.push(item);
+            actualizarListaItemsAgregar();
+        }
+        
+        function actualizarListaItemsAgregar() {
+            let html = '';
+            
+            window.itemsTemp.forEach((item, idx) => {
+                html += `<div style="background:white;padding:10px;margin:5px 0;border-radius:8px;display:flex;justify-content:space-between;align-items:center">
+                    <div><strong>${item.nombre}</strong> (${item.oem}) x ${item.cantidad}</div>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <div style="font-weight:700;color:#1C69D4">${item.sinStock ? 'SIN STOCK' : '₲ ' + fmt(item.total)}</div>
+                        <button onclick="eliminarItemTempAgregar(${idx})" style="background:#e74c3c;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer">✕</button>
+                    </div>
+                </div>`;
+            });
+            
+            if (window.itemsTemp.length === 0) {
+                html = '<p style="text-align:center;color:#999;padding:20px">No hay items</p>';
+            }
+            
+            document.getElementById('listaItemsAgregar').innerHTML = html;
+            document.getElementById('contadorAgregar').textContent = window.itemsTemp.length;
+        }
+        
+        function eliminarItemTempAgregar(idx) {
+            window.itemsTemp.splice(idx, 1);
+            actualizarListaItemsAgregar();
+        }
+        
+        async function guardarItemsAgregados(presId) {
+            if (window.itemsTemp.length === 0) {
+                alert('❌ No hay items para agregar');
+                return;
+            }
+            
+            for (let item of window.itemsTemp) {
+                const itemId = (itemsCotizar.length + 1 + window.itemsTemp.indexOf(item)).toString();
+                await escribir('ITEMS_PRESUPUESTO', [
+                    itemId, presId, item.nombre, item.oem, item.cantidad,
+                    '', '', item.precio, item.total, 
+                    item.sinStock ? 'SIN_STOCK' : 'DISP', 
+                    '', '', '', '', 'PENDIENTE'
+                ]);
+            }
+            
+            alert('✅ ' + window.itemsTemp.length + ' items agregados');
+            document.getElementById('modalAgregarItem').remove();
+            await cargarDatos();
+            verPres(presId);
+        }
+        
+
+        function mostrarClientes() {
+            document.getElementById('moduleTitle').textContent = '👥 Clientes';
+            document.getElementById('menuContainer').innerHTML = `
+                <div style="padding:15px;border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarPresupuestos()">📝 Presupuestos</div>
+                <div style="padding:15px;background:rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarClientes()">👥 Clientes</div>
+                <div style="padding:15px;border-radius:8px;cursor:pointer;margin:5px 0" onclick="mostrarCotizador()">💰 Cotizaciones</div>
+            `;
+            
+            let html = '<div class="toolbar"><input type="text" id="buscarC" placeholder="🔍 Buscar cliente..." onkeyup="filtrarC()" /><button class="btn btn-green" onclick="crearCliente()">➕ NUEVO</button></div><div id="listaC">';
+            
+            if (clientes.length === 0) {
+                html += '<div style="text-align:center;padding:60px;color:#999"><h3>Sin clientes</h3></div>';
+            } else {
+                clientes.forEach(c => {
+                    const presC = presupuestos.filter(p => p.Cliente_ID === c.SKU || p.Cliente_Nombre === c.Nombre);
+                    html += `<div class="card" data-s="${c.Nombre} ${c.RUC || ''} ${c.Telefono || ''}">
+                        <div style="display:flex;justify-content:space-between">
+                            <div style="flex:1">
+                                <h3>${c.Nombre}</h3>
+                                <p><strong>RUC:</strong> ${c.RUC || 'N/A'}</p>
+                                <p><strong>Teléfono:</strong> ${c.Telefono || 'N/A'}</p>
+                            </div>
+                            <div style="text-align:center;background:#1C69D4;color:white;padding:15px;border-radius:10px;min-width:100px">
+                                <div style="font-size:24px;font-weight:700">${presC.length}</div>
+                                <div style="font-size:11px">PRESUPUESTOS</div>
+                            </div>
+                        </div>
+                    </div>`;
+                });
+            }
+            
+            html += '</div>';
+            document.getElementById('mainContent').innerHTML = html;
+            document.getElementById('sidePanel').innerHTML = '<div style="padding:20px"><h3>Total: ' + clientes.length + '</h3></div>';
+        }
+        
+        function filtrarC() {
+            const b = document.getElementById('buscarC').value.toLowerCase();
+            document.querySelectorAll('#listaC .card').forEach(c => {
+                const s = c.getAttribute('data-s');
+                if (s) c.style.display = s.toLowerCase().includes(b) ? 'block' : 'none';
+            });
+        }
+        
+        async function crearCliente() {
+            const nombre = prompt('Nombre del cliente:');
+            if (!nombre) return;
+            const ruc = prompt('RUC/CI:') || '';
+            const tel = prompt('Teléfono:') || '';
+            alert('Cliente creado: ' + nombre);
+            await cargarDatos();
+            mostrarClientes();
+        }
+        
+function logout() {
+            if (confirm('¿Cerrar sesión?')) location.reload();
+        }
+    </script>
+</body>
+</html>
+        function verificarClienteNuevo() {
+            try {
+                const input = document.getElementById('nCliente');
+                if (!input) return;
+                
+                const valor = input.value;
+                const clienteExiste = clientes.find(c => c.Nombre === valor);
+                
+                const div = document.getElementById('divNuevoCliente');
+                if (div) {
+                    if (!clienteExiste && valor.trim() !== '') {
+                        div.style.display = 'block';
+                    } else {
+                        div.style.display = 'none';
+                    }
+                }
+            } catch(e) {
+                console.error('Error en verificarClienteNuevo:', e);
+            }
+        }
+        
+         else {
+                div.style.display = 'none';
+            }
+        }
+        
+
+        
+        function logout() {
+            if (confirm('¿Cerrar sesión?')) location.reload();
+        }
+    </script>
+</body>
+</html>
